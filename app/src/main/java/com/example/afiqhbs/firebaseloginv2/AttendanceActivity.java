@@ -10,12 +10,16 @@ import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.location.Location;
 import android.os.AsyncTask;
+import android.provider.ContactsContract;
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
 import android.support.v4.app.ActivityCompat;
 import android.support.v4.content.ContextCompat;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
+import android.text.Html;
+import android.text.format.DateUtils;
+import android.text.style.TtsSpan;
 import android.util.Log;
 import android.view.Menu;
 import android.view.MenuInflater;
@@ -48,14 +52,19 @@ import com.google.android.gms.maps.model.CircleOptions;
 import com.google.android.gms.maps.model.LatLng;
 import com.google.android.gms.maps.model.Marker;
 import com.google.android.gms.maps.model.MarkerOptions;
+import com.google.firebase.database.DataSnapshot;
+import com.google.firebase.database.DatabaseError;
 import com.google.firebase.database.DatabaseReference;
 import com.google.firebase.database.FirebaseDatabase;
+import com.google.firebase.database.ValueEventListener;
 
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.text.DateFormat;
+import java.text.ParseException;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Date;
@@ -78,13 +87,13 @@ public class AttendanceActivity extends AppCompatActivity
     private Location lastLocation;
 
     private TextView textLat, textLong;
-    private Button clockInBtn, clockOutBtn;
+    private Button clockInBtn, clockOutBtn,hBtn, rBtn;
 
     private MapFragment mapFragment;
 
     FirebaseDatabase database = FirebaseDatabase.getInstance();
     DatabaseReference myInfo = database.getReference("info");
-
+    DatabaseReference myEmail = database.getReference("email");
     List<User> dbClock= new ArrayList<>();
 
     private static final String NOTIFICATION_MSG = "NOTIFICATION MSG";
@@ -106,8 +115,14 @@ public class AttendanceActivity extends AppCompatActivity
 
         clockInBtn = (Button) findViewById(R.id.button5);
         clockOutBtn = (Button) findViewById(R.id.button12);
+        hBtn = (Button) findViewById(R.id.buttonH);
+        rBtn = (Button) findViewById(R.id.buttonR);
 
-        id = "Irfan";
+        Intent i = getIntent();
+        if(i!=null){
+            Bundle bundle = i.getExtras();
+            this.id = bundle.getString("name");
+        }
 
         // initialize GoogleMaps
         initGMaps();
@@ -115,7 +130,26 @@ public class AttendanceActivity extends AppCompatActivity
         // create GoogleApiClient
         createGoogleApi();
 
+        hBtn.setOnClickListener(new View.OnClickListener()
+        {
+            @Override
+            public void onClick(View v)
+            {
+                startActivity(new Intent(AttendanceActivity.this, HistoryActivity.class));
+            }
+        });
+
+        rBtn.setOnClickListener(new View.OnClickListener()
+        {
+            @Override
+            public void onClick(View v)
+            {
+                startActivity(new Intent(AttendanceActivity.this, RemarksActivity.class));
+            }
+        });
+
     }
+
 
     // Create GoogleApiClient instance
     private void createGoogleApi() {
@@ -167,8 +201,69 @@ public class AttendanceActivity extends AppCompatActivity
                 clearGeofence();
                 return true;
             }
+            case R.id.reqEmail: {
+                sendEmail();
+                return true;
+            }
         }
         return super.onOptionsItemSelected(item);
+    }
+
+    @SuppressWarnings("deprecation")
+    private void sendEmail() {
+        final String[] emailAddress = {""};
+
+         myEmail.addValueEventListener(new ValueEventListener() {
+            @Override
+            public void onDataChange(DataSnapshot dataSnapshot) {
+                Iterable<DataSnapshot> child = dataSnapshot.getChildren();
+                for(DataSnapshot c : child)
+                {
+                    if(id == c.getKey().toString())
+                        emailAddress[0] = c.child("address").getValue(String.class);
+                }
+            }
+
+            @Override
+            public void onCancelled(DatabaseError databaseError) {
+
+            }
+        });
+        //Construct string
+        final String[] htmlText = {""};
+
+        myInfo.addValueEventListener(new ValueEventListener() {
+            @Override
+            public void onDataChange(DataSnapshot dataSnapshot) {
+                Iterable<DataSnapshot> child = dataSnapshot.getChildren();
+                int count = 0;
+                String tempHtml = "" + "<html><body>";
+                for(DataSnapshot c: child){
+                    String userID = c.child("name").getValue(String.class);
+                    if(id == userID){
+                        count += 1;
+                        tempHtml = tempHtml + count + ". " + c.child("dateIn").getValue(String.class);
+                        tempHtml += "\\n";
+                    }
+                }
+                htmlText[0] += tempHtml;
+            }
+
+            @Override
+            public void onCancelled(DatabaseError databaseError) {
+
+            }
+        });
+
+
+        //Send Email
+        Intent emailIntent2 = new Intent(Intent.ACTION_SEND);
+        String[] recepients = new String[]{emailAddress[0],};
+        emailIntent2.putExtra(Intent.EXTRA_EMAIL,recepients);
+        emailIntent2.putExtra(android.content.Intent.EXTRA_TEXT, Html.fromHtml(htmlText[0]));
+        emailIntent2.setType("text/html");
+        startActivity(Intent.createChooser(emailIntent2, "Send mail client :"));
+        finish();
     }
 
     private final int REQ_PERMISSION = 999;
@@ -380,7 +475,7 @@ public class AttendanceActivity extends AppCompatActivity
 
     private static final long GEO_DURATION = 60 * 60 * 1000;
     private static final String GEOFENCE_REQ_ID = "UiTM Geofence";
-    private static final float GEOFENCE_RADIUS = 1500.0f; // in meters
+    private static final float GEOFENCE_RADIUS = 100.0f; // in meters
 
     // Create a Geofence
     private Geofence createGeofence( LatLng latLng, float radius ) {
@@ -542,7 +637,7 @@ public class AttendanceActivity extends AppCompatActivity
                 JSONObject jsonObject = new JSONObject(s);
 
                 final String address = ((JSONArray)jsonObject.get("results")).getJSONObject(0).get("formatted_address").toString();
-                //boolean contains = address.matches(".*\\bUitm\\b.*");
+                //boolean contains = address.matches(".*\\bShah Alam\\b.*");
                 boolean contains = address.toLowerCase().contains("uitm");
                 Toast.makeText(getApplicationContext(),address,Toast.LENGTH_SHORT).show();
                 Log.d("Address",address);
@@ -554,28 +649,112 @@ public class AttendanceActivity extends AppCompatActivity
                 clockInBtn.setOnClickListener(new View.OnClickListener() {
                     @Override
                     public void onClick(View v) {
-                        String currDate = DateFormat.getDateTimeInstance().format(new Date());
-                        String key = myInfo.push().getKey();
-                        //info clkInfo = new info(id, currDate , "" , address , "", key);
-                        //myInfo.child(key).setValue(clkInfo);
-                        Toast.makeText(getApplicationContext(),currDate,Toast.LENGTH_SHORT).show();
-                        clockInBtn.setEnabled(false);
+                        final String currDate = DateFormat.getDateTimeInstance().format(new Date());
+                        final String key = myInfo.push().getKey();
+                        final User clkInfo = new User(id, currDate , "" , address , "", key, "");
+                        final boolean[] hasClockIn = {false};
+                        dbClock.clear();
+                        myInfo.addValueEventListener(new ValueEventListener() {
+                            @Override
+                            public void onDataChange(DataSnapshot dataSnapshot) {
+                                Iterable<DataSnapshot> child = dataSnapshot.getChildren();
+                                for(DataSnapshot c : child)
+                                {
+                                    User temp = c.getValue(User.class);
+                                    dbClock.add(temp);
+                                }
+                                for(User a : dbClock)
+                                {
+                                    if(id == a.name && currDate.substring(0,6) == a.dateIn.substring(0,6))
+                                    {
+                                        hasClockIn[0] = false;
+                                    }
+                                    else
+                                    {
+                                        hasClockIn[0] = true;
+                                        break;
+                                    }
+                                }
+                                if(hasClockIn[0] == true)
+                                {
+                                    Toast.makeText(getApplicationContext(),"Already Check In!",Toast.LENGTH_SHORT).show();
+                                    clockInBtn.setEnabled(false);
+                                }
+                                else
+                                {
+                                    myInfo.child(key).setValue(clkInfo);
+                                    Toast.makeText(getApplicationContext(),currDate,Toast.LENGTH_SHORT).show();
+                                    clockInBtn.setEnabled(false);
+                                }
+                            }
+
+                            @Override
+                            public void onCancelled(DatabaseError databaseError) {
+
+                            }
+                        });
                     }
                 });
 
-                //ko xleh run sebb condition dia...dia akan amik current location
-                //pastu try tgk location ko jika dalam uitm...
-                //kalo bukan dlm uitm xleh clock
-               if(contains == true)
-               {
-                   clockInBtn.setEnabled(true);
-                   clockOutBtn.setEnabled(true);
-               }
-               else
-               {
+                clockOutBtn.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        Log.d("Testing1",myInfo.toString());
+                        final boolean[] hasClockOut = {false};
+                        dbClock.clear();
+                        myInfo.addValueEventListener(new ValueEventListener() {
+                            @Override
+                            public void onDataChange(DataSnapshot dataSnapshot) {
+                                Log.d("Testing2",dataSnapshot.getRef().toString());
+                                Iterable<DataSnapshot> children = dataSnapshot.getChildren();
+                                String currDate = DateFormat.getDateTimeInstance().format(new Date());
+                                String[] splitCurrDate = currDate.split(",");
+                                for(DataSnapshot child:children){
+                                    Log.d("Testing3",child.getValue().toString());
+                                    User temp = child.getValue(User.class);
+                                    dbClock.add(temp);
+                                }
+                                for(User a : dbClock){
+                                    SimpleDateFormat format = new SimpleDateFormat("dd/MM/yyyy");
+                                    Date thsDate = new Date();
+                                    Date cDate = new Date();
+                                    try{
+                                        thsDate = format.parse(a.dateIn);
+                                        cDate = format.parse(currDate);
+                                    }
+                                    catch (ParseException e) {
+                                        e.printStackTrace();
+                                    }
+                                    if(id == a.name && (thsDate == cDate))
+                                    {
+                                        myInfo.child(a.key).child("dateOut").setValue(currDate);
+                                        hasClockOut[0] = true;
+                                        clockOutBtn.setEnabled(false);
+                                    }
+                                }
+                                if(hasClockOut[0] == false)
+                                {
+                                    Toast.makeText(getApplicationContext(),"Please Clock In",Toast.LENGTH_SHORT).show();
+                                }
+                            }
+
+                            @Override
+                            public void onCancelled(DatabaseError databaseError) {
+
+                            }
+                        });
+                    }
+                });
+                if(contains == true)
+                {
+                    clockInBtn.setEnabled(true);
+                    clockOutBtn.setEnabled(true);
+                }
+                else
+                {
                     clockInBtn.setEnabled(false);
                     clockOutBtn.setEnabled(false);
-               }
+                }
 
 
             } catch (JSONException e) {
